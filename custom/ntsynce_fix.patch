@@ -1,0 +1,25 @@
+diff --git a/fs/xattr.c b/fs/xattr.c
+index abc1234..def5678 100644
+--- a/fs/xattr.2. c
++++ b/fs/xattr 2. c
+@@ -195,10 +195,11 @@ int vfs_setxattr(struct dentry *dentry, const char *name, void *value,
+ 	return error;
+ }
+ 
+-static int __vfs_setxattr_noperm(struct dentry *dentry, const char *name,
++int __vfs_setxattr_noperm(struct dentry *dentry, const char *name,
+ 		void *value, size_t size, int flags)
+ {
+ 	struct inode *inode = d_inode(dentry);
++	int err;
+ 
+ 	if (inode->i_op->setxattr) {
+ 		err = inode->i_op->setxattr(inode, name, value, size, flags);
+@@ -215,6 +216,7 @@ static int __vfs_setxattr_noperm(struct dentry *dentry, const char *name,
+ 	return error;
+ }
+ 
++EXPORT_SYMBOL(__vfs_setxattr_noperm);
+ 
+ /*
+  * Check permissions for extended attribute access.  This is a bit more complex
