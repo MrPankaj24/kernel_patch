@@ -1,0 +1,62 @@
+--- fs/proc/task_mmu.c	2026-04-25 13:43:00.893438501 +0530
++++ fs/proc/task_mmu.c	2026-04-25 13:49:26.222975770 +0530
+@@ -309,11 +309,48 @@
+ 	const char *name = NULL;
+ 	struct dentry *dentry;
+ 
++#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
++	char *spoofed_redirected_name = NULL;
++#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
++
+ 	if (file) {
+ 		struct inode *inode = file_inode(vma->vm_file);
++
++#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
++		if (SUSFS_IS_INODE_OPEN_REDIRECT(inode)) {
++			if (!susfs_open_redirect_spoof_show_map_vma(inode, &ino, &dev, spoofed_redirected_name)) {
++				pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
++				goto orig_flow;
++			}
++		}
++#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
++#ifdef CONFIG_KSU_SUSFS_SUS_MAP
++		if (SUSFS_IS_INODE_SUS_MAP(inode)) {
++			seq_setwidth(m, 25 + sizeof(void *) * 6 - 1);
++			seq_put_hex_ll(m, NULL, vma->vm_start, 8);
++			seq_put_hex_ll(m, "-", vma->vm_end, 8);
++			seq_putc(m, ' ');
++			seq_putc(m, '-');
++			seq_putc(m, '-');
++			seq_putc(m, '-');
++			seq_putc(m, 'p');
++			seq_put_hex_ll(m, " ", pgoff, 8);
++			seq_put_hex_ll(m, " ", MAJOR(dev), 2);
++			seq_put_hex_ll(m, ":", MINOR(dev), 2);
++			seq_put_decimal_ull(m, " ", ino);
++			seq_putc(m, ' ');
++			goto done;
++		}
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
++
+ 		dev = inode->i_sb->s_dev;
+ 		ino = inode->i_ino;
+ 		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
++
++#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
++		susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
++
+ 		dentry = file->f_path.dentry;
+         if (dentry) {
+         	const char *path = (const char *)dentry->d_name.name; 
+@@ -333,6 +370,10 @@
+         }
+ 	}
+ 
++#ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
++orig_flow:
++#endif // #ifdef CONFIG_KSU_SUSFS_OPEN_REDIRECT
++
+ 	start = vma->vm_start;
+ 	end = VMA_PAD_START(vma);
+ 	show_vma_header_prefix(m, start, end, flags, pgoff, dev, ino);
