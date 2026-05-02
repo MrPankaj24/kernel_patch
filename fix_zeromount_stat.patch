@@ -1,0 +1,18 @@
+--- fs/stat.c	2026-05-02 03:38:38.000000000 +0530
++++ fs/stat.c	2026-05-02 09:30:50.130742794 +0530
+@@ -289,6 +289,15 @@
+ 	unsigned lookup_flags = 0;
+ 	int error;
+ 
++#ifdef CONFIG_ZEROMOUNT
++	/* Try ZeroMount hook for relative paths */
++	if (filename) {
++		int zm_ret = zeromount_stat_hook(dfd, filename, stat, request_mask, flags);
++		if (zm_ret != -ENOENT)
++			return zm_ret;
++	}
++#endif
++
+ #ifdef CONFIG_KSU_SUSFS
+ 	if (likely(susfs_is_current_proc_umounted()))
+ 		goto orig_flow;
