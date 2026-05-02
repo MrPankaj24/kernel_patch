@@ -1,5 +1,5 @@
---- fs/proc/base.c	2026-04-25 13:38:27.195441087 +0530
-+++ fs/proc/base.c	2026-04-25 13:40:23.087017185 +0530
+--- fs/proc/base.c
++++ fs/proc/base.c
 @@ -102,6 +102,9 @@
  #include <linux/cn_proc.h>
  #include <linux/task_integrity.h>
