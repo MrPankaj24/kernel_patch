@@ -1,5 +1,5 @@
---- fs/namespace.c	2026-04-25 13:22:46.213910966 +0530
-+++ fs/namespace.c	2026-04-25 13:25:31.113527425 +0530
+--- fs/namespace.c
++++ fs/namespace.c
 @@ -34,10 +34,24 @@
  #include <linux/mnt_idmapping.h>
  #include <linux/delay.h>
