@@ -1,0 +1,93 @@
+diff --git a/drivers/gpu/drm/samsung/dpu/Kconfig b/drivers/gpu/drm/samsung/dpu/Kconfig
+index eadbf490edf9..693e6ed47bad 100755
+--- a/drivers/gpu/drm/samsung/dpu/Kconfig
++++ b/drivers/gpu/drm/samsung/dpu/Kconfig
+@@ -145,6 +145,18 @@ config KCAL_CTRL
+ 	  brightness and contrast are composed onto the panel's own
+ 	  gamma matrix at program time.
+ 
++config KLAPSE_CTRL
++	bool "Support KLapse time-based color shift (requires KCAL)"
++	depends on KCAL_CTRL
++	default n
++	help
++	  KLapse automatically interpolates RGB gains between a daytime
++	  and a nighttime profile based on the clock, feeding the KCAL
++	  DQE pipeline every minute.
++	  See /sys/kernel/klapse/ (enabled, daytime_rgb, nighttime_rgb,
++	  mode_hour_start, mode_hour_end, mode, brightness_factor,
++	  target_rgb).
++
+ config EXYNOS_FREQ_HOP
+     tristate "Support DPHY PLL Frequency Hopping"
+ 	depends on DRM_SAMSUNG_DECON
+diff --git a/drivers/gpu/drm/samsung/dpu/Makefile b/drivers/gpu/drm/samsung/dpu/Makefile
+index 2904fb242110..06f34f52e5e4 100755
+--- a/drivers/gpu/drm/samsung/dpu/Makefile
++++ b/drivers/gpu/drm/samsung/dpu/Makefile
+@@ -50,6 +50,7 @@ exynos-drm-y := exynos_drm_drv.o  exynos_drm_fb.o exynos_drm_format.o		\
+ exynos-drm-$(CONFIG_DRM_MCD_COMMON) += mcd_cal/mcd_drm_dsim.o mcd_cal/mcd_drm_helper.o
+ 
+ exynos-drm-$(CONFIG_DRM_FBDEV_EMULATION) += exynos_drm_fbdev.o
++exynos-drm-$(CONFIG_KLAPSE_CTRL) += exynos_drm_klapse.o
+ exynos-drm-$(CONFIG_DRM_SAMSUNG_DECON)	+= exynos_drm_decon.o
+ exynos-drm-$(CONFIG_DRM_SAMSUNG_DPP)	+= exynos_drm_dpp.o
+ exynos-drm-$(CONFIG_DRM_SAMSUNG_DSI)	+= exynos_drm_dsim.o
+diff --git a/drivers/gpu/drm/samsung/dpu/exynos_drm_dqe.c b/drivers/gpu/drm/samsung/dpu/exynos_drm_dqe.c
+index 70abbfb9596b..8f1d5f5d5897 100755
+--- a/drivers/gpu/drm/samsung/dpu/exynos_drm_dqe.c
++++ b/drivers/gpu/drm/samsung/dpu/exynos_drm_dqe.c
+@@ -1718,6 +1718,9 @@ static struct kcal_ctrl kcal_ctrl_data = {
+ 	.enable = true,
+ };
+ 
++/* Main-display DQE instance, captured in exynos_dqe_register() */
++static struct exynos_dqe *kcal_main_dqe;
++
+ static inline s32 kcal_fp(int v, int d)
+ {
+ 	return ((s32)v << KCAL_FP_SHIFT) / d;
+@@ -3020,6 +3023,28 @@ static ssize_t kcal_store(struct device *dev,
+ }
+ static DEVICE_ATTR(kcal, 0664, kcal_show, kcal_store);
+ 
++/*
++ * External interface for KLapse: update KCAL RGB gains and
++ * trigger an immediate DQE gamma matrix refresh.
++ */
++int kcal_ctrl_set_rgb(int r, int g, int b)
++{
++	struct kcal_ctrl *k = &kcal_ctrl_data;
++
++	if (!kcal_main_dqe)
++		return -ENODEV;
++
++	mutex_lock(&kcal_main_dqe->lock);
++	k->r = clamp_t(int, r, 0, KCAL_GAIN_MAX);
++	k->g = clamp_t(int, g, 0, KCAL_GAIN_MAX);
++	k->b = clamp_t(int, b, 0, KCAL_GAIN_MAX);
++	mutex_unlock(&kcal_main_dqe->lock);
++
++	kcal_refresh(kcal_main_dqe);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(kcal_ctrl_set_rgb);
++
+ #define KCAL_INT_ATTR(_name, _member, _min, _max) \
+ static ssize_t kcal_##_name##_show(struct device *dev, \
+ 				struct device_attribute *attr, char *buf) \
+@@ -3907,6 +3932,11 @@ struct exynos_dqe *exynos_dqe_register(struct decon_device *decon)
+ 	dqe->state = DQE_STATE_DISABLE;
+ 	dqe->initialized = true;
+ 
++#ifdef CONFIG_KCAL_CTRL
++	/* decon0 only reaches this point; remember it for KLapse/KCAL */
++	kcal_main_dqe = dqe;
++#endif
++
+ 	dqe_info(dqe, "Display Quality Enhancer is supported\n");
+ 
+ 	return dqe;
+diff --git a/drivers/gpu/drm/samsung/dpu/exynos_drm_klapse.c b/drivers/gpu/drm/samsung/dpu/exynos_drm_klapse.c
+new file mode 100644
+index 000000000000..e69de29bb2d1
