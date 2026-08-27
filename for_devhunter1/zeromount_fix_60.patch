@@ -27,14 +27,18 @@ index 6c8e1f188b82..0d88fc7af1cf 100644
  		susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);
  #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 diff --git a/fs/stat.c b/fs/stat.c
-index ab6214247eb8..b067b0de9c29 100644
+index ab6214247eb8..15dcfe06b1d3 100644
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -284,6 +284,16 @@ static int vfs_statx(int dfd, const char __user *filename, int flags,
+@@ -284,10 +284,20 @@ static int vfs_statx(int dfd, const char __user *filename, int flags,
  	struct path path;
  	unsigned lookup_flags = 0;
  	int error;
 +
+ #ifdef CONFIG_KSU_SUSFS
+ 	struct filename *fname = NULL;
+ #endif
+ 
 +#ifdef CONFIG_ZEROMOUNT
 +	/* Try ZeroMount hook for relative paths */
 +	if (filename) {
@@ -44,6 +48,6 @@ index ab6214247eb8..b067b0de9c29 100644
 +	}
 +#endif
 +
- #ifdef CONFIG_KSU_SUSFS
- 	struct filename *fname = NULL;
- #endif
+ 	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_EMPTY_PATH |
+ 		     AT_STATX_SYNC_TYPE))
+ 		return -EINVAL;
