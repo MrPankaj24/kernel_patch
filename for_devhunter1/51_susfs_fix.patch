@@ -20,11 +20,11 @@ index 630971ad062c..554e718dbdba 100644
 @@ -35,10 +35,22 @@
  #include <linux/delay.h>
  #include <linux/fslog.h>
- 
++ 
 +#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 +#include <linux/susfs_def.h>
 +#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-+
+
  #include "pnode.h"
  #include "internal.h"
  #include <trace/hooks/blk.h>
