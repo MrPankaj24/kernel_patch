@@ -1,0 +1,43 @@
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index 25911097d057..79b6c8c325e0 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -22,6 +22,9 @@
+ #include <linux/uaccess.h>
+ #include <linux/pkeys.h>
+ #include <trace/hooks/mm.h>
++#ifdef CONFIG_ZEROMOUNT
++#include <linux/zeromount.h>
++#endif
+ #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
+ #include <linux/susfs_def.h>
+ #endif // #if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
+@@ -323,6 +326,9 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma)
+ 		dev = inode->i_sb->s_dev;
+ 		ino = inode->i_ino;
+ 		pgoff = ((loff_t)vma->vm_pgoff) << PAGE_SHIFT;
++#ifdef CONFIG_ZEROMOUNT
++		zeromount_spoof_mmap_metadata(inode, &dev, &ino);
++#endif
+ #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+ 		susfs_sus_kstat_spoof_show_map_vma(inode, &dev, &ino);
+ #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+diff --git a/fs/stat.c b/fs/stat.c
+index ab6214247eb8..716721aba9de 100644
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -287,6 +287,14 @@ static int vfs_statx(int dfd, const char __user *filename, int flags,
+ #ifdef CONFIG_KSU_SUSFS
+ 	struct filename *fname = NULL;
+ #endif
++#ifdef CONFIG_ZEROMOUNT
++	/* Try ZeroMount hook for relative paths */
++	if (filename) {
++		int zm_ret = zeromount_stat_hook(dfd, filename, stat, request_mask, flags);
++		if (zm_ret != -ENOENT)
++			return zm_ret;
++	}
++#endif
+ 
+ 	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT | AT_EMPTY_PATH |
+ 		      AT_STATX_SYNC_TYPE))
