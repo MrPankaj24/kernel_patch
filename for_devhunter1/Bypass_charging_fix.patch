@@ -1,0 +1,72 @@
+diff --git a/drivers/battery/charger/sm5714_charger/sm5714_charger.c b/drivers/battery/charger/sm5714_charger/sm5714_charger.c
+index b764b2ce9a41..12723fb6ed21 100755
+--- a/drivers/battery/charger/sm5714_charger/sm5714_charger.c
++++ b/drivers/battery/charger/sm5714_charger/sm5714_charger.c
+@@ -222,9 +222,7 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
+ 	}
+ 
+ 	if (enable) {
+-		if (!sm5714_get_facmode())
+-			sm5714_update_reg(charger->i2c, SM5714_CHG_REG_VBUSCNTL,
+-				(0x24 << 0), (0x7F << 0));		/* VBUS_LIMIT	= 1000mA */
++                /* [BYPASS PATCH] Removed 1000mA VBUS_LIMIT throttle */
+ 
+ 		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1,
+ 			(0x1 << 4), (0x1 << 4));	/* OFFREVERSE deactivated(1) */
+@@ -244,9 +242,7 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
+ 
+ 		chg_set_en_bypass(charger, 0);	/* ENBYPASS = disable(0) */
+ 
+-		if (!sm5714_get_facmode())
+-			sm5714_update_reg(charger->i2c, SM5714_CHG_REG_VBUSCNTL,
+-				(0x00 << 0), (0x7F << 0));		/* VBUS_LIMIT	= 100mA */
++                /* [BYPASS PATCH] Removed 100mA VBUS_LIMIT clamp */
+ 	}
+ 	pr_info("sm5714-charger: %s: %s\n", __func__, enable ? "Enable" : "Disable");
+ }
+@@ -873,12 +869,25 @@ static void sm5714_chg_charging(struct sm5714_charger_data *charger, int chg_en)
+ 			chg_set_wdtcntl_reset(charger);
+ 			chg_set_wdt_timer(charger, WDT_TIME_S_90);
+ 		}
+-	}
+ 
+-	chg_set_enq4fet(charger, chg_en);
+-	chg_set_wdt_enable(charger, chg_en);
++		/* [BYPASS PATCH] Disable bypass registers when resuming normal charging */
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 1), (0x1 << 1));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 4), (0x1 << 4));
++
++		chg_set_enq4fet(charger, 1);
++		chg_set_wdt_enable(charger, 1);
++
++	} else {
++		/* [BYPASS PATCH] Keep buck ON for VBUS motherboard power, route current away from battery */
++		chg_set_enq4fet(charger, 1);
++		chg_set_wdt_enable(charger, 1);
++
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 4), (0x1 << 4));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_CNTL1, (0x0 << 6), (0x1 << 6));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 1), (0x1 << 1));
++	}
+ 
+-	pr_info("%s: charging en(%d)\n", __func__, chg_en);
++	pr_info("%s: charging en(%d) [BYPASS ENABLED]\n", __func__, chg_en);
+ }
+ 
+ /*
+diff --git a/drivers/battery/common/sec_battery.c b/drivers/battery/common/sec_battery.c
+index 7a8b03d2061f..a3c6c04b9757 100755
+--- a/drivers/battery/common/sec_battery.c
++++ b/drivers/battery/common/sec_battery.c
+@@ -4247,8 +4247,9 @@ static void sec_bat_check_store_mode(struct sec_battery_info *battery)
+ 		 * display test requirement : do not decrease fcc in store mode condition
+ 		 */
+ 		if (!battery->display_test && (battery->store_mode || !battery->charging_enabled) && battery->capacity >= 5) {
+-			sec_vote(battery->input_vote, VOTER_STORE_MODE, true,
+-				mA_by_mWmV(battery->pdata->store_mode_max_input_power, battery->input_voltage));
++			/* [BYPASS PATCH] Prevent software polling loop from throttling wall power to 5W during bypass */
++			// sec_vote(battery->input_vote, VOTER_STORE_MODE, true,
++			//	mA_by_mWmV(battery->pdata->store_mode_max_input_power, battery->input_voltage));
+ 		}
+ 
+ 		if (battery->capacity >= battery->pdata->store_mode_charging_max) {
