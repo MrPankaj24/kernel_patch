@@ -1,0 +1,125 @@
+diff --git a/drivers/battery/charger/sm5714_charger/sm5714_charger.c b/drivers/battery/charger/sm5714_charger/sm5714_charger.c
+index b764b2ce9a41..12723fb6ed21 100755
+--- a/drivers/battery/charger/sm5714_charger/sm5714_charger.c
++++ b/drivers/battery/charger/sm5714_charger/sm5714_charger.c
+@@ -222,9 +222,7 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
+ 	}
+ 
+ 	if (enable) {
+-		if (!sm5714_get_facmode())
+-			sm5714_update_reg(charger->i2c, SM5714_CHG_REG_VBUSCNTL,
+-				(0x24 << 0), (0x7F << 0));		/* VBUS_LIMIT	= 1000mA */
++                /* [BYPASS PATCH] Removed 1000mA VBUS_LIMIT throttle */
+ 
+ 		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1,
+ 			(0x1 << 4), (0x1 << 4));	/* OFFREVERSE deactivated(1) */
+@@ -244,9 +242,7 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
+ 
+ 		chg_set_en_bypass(charger, 0);	/* ENBYPASS = disable(0) */
+ 
+-		if (!sm5714_get_facmode())
+-			sm5714_update_reg(charger->i2c, SM5714_CHG_REG_VBUSCNTL,
+-				(0x00 << 0), (0x7F << 0));		/* VBUS_LIMIT	= 100mA */
++                /* [BYPASS PATCH] Removed 100mA VBUS_LIMIT clamp */
+ 	}
+ 	pr_info("sm5714-charger: %s: %s\n", __func__, enable ? "Enable" : "Disable");
+ }
+@@ -873,12 +869,25 @@ static void sm5714_chg_charging(struct sm5714_charger_data *charger, int chg_en)
+ 			chg_set_wdtcntl_reset(charger);
+ 			chg_set_wdt_timer(charger, WDT_TIME_S_90);
+ 		}
+-	}
+ 
+-	chg_set_enq4fet(charger, chg_en);
+-	chg_set_wdt_enable(charger, chg_en);
++		/* [BYPASS PATCH] Disable bypass registers when resuming normal charging */
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 1), (0x1 << 1));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 4), (0x1 << 4));
++
++		chg_set_enq4fet(charger, 1);
++		chg_set_wdt_enable(charger, 1);
++
++	} else {
++		/* [BYPASS PATCH] Keep buck ON for VBUS motherboard power, route current away from battery */
++		chg_set_enq4fet(charger, 1);
++		chg_set_wdt_enable(charger, 1);
++
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 4), (0x1 << 4));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_CNTL1, (0x0 << 6), (0x1 << 6));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 1), (0x1 << 1));
++	}
+ 
+-	pr_info("%s: charging en(%d)\n", __func__, chg_en);
++	pr_info("%s: charging en(%d) [BYPASS ENABLED]\n", __func__, chg_en);
+ }
+ 
+ /*
+diff --git a/drivers/battery/common/sec_battery.c b/drivers/battery/common/sec_battery.c
+index 7a8b03d2061f..edc46889b114 100755
+--- a/drivers/battery/common/sec_battery.c
++++ b/drivers/battery/common/sec_battery.c
+@@ -63,6 +63,30 @@ static char __read_mostly *f_mode;
+ module_param(f_mode, charp, 0444);
+ #endif
+ 
++/* =========================================================
++ * CUSTOM BYPASS CHARGING NODE (FALLBACK LOGIC)
++ * ========================================================= */
++static int custom_bypass_active = 0;
++
++static ssize_t custom_bypass_show(struct device *dev,
++				  struct device_attribute *attr, char *buf)
++{
++	return snprintf(buf, PAGE_SIZE, "%d\n", custom_bypass_active);
++}
++
++static ssize_t custom_bypass_store(struct device *dev,
++				   struct device_attribute *attr,
++				   const char *buf, size_t count)
++{
++	int val;
++	if (kstrtoint(buf, 10, &val))
++		return -EINVAL;
++	
++	custom_bypass_active = !!val;
++	return count;
++}
++static DEVICE_ATTR(custom_bypass, 0664, custom_bypass_show, custom_bypass_store);
++
+ static const char *sec_voter_name[] = {
+ 	FOREACH_VOTER(GENERATE_STRING)
+ };
+@@ -4246,9 +4270,10 @@ static void sec_bat_check_store_mode(struct sec_battery_info *battery)
+ 		 * since target could be turned off during boot up
+ 		 * display test requirement : do not decrease fcc in store mode condition
+ 		 */
+-		if (!battery->display_test && (battery->store_mode || !battery->charging_enabled) && battery->capacity >= 5) {
+-			sec_vote(battery->input_vote, VOTER_STORE_MODE, true,
+-				mA_by_mWmV(battery->pdata->store_mode_max_input_power, battery->input_voltage));
++		if (!battery->display_test && (battery->store_mode || custom_bypass_active || !battery->charging_enabled) && battery->capacity >= 5) {
++			/* [BYPASS PATCH] Prevent software polling loop from throttling wall power to 5W during bypass */
++			// sec_vote(battery->input_vote, VOTER_STORE_MODE, true,
++			//	mA_by_mWmV(battery->pdata->store_mode_max_input_power, battery->input_voltage));
+ 		}
+ 
+ 		if (battery->capacity >= battery->pdata->store_mode_charging_max) {
+@@ -4278,7 +4303,7 @@ static void sec_bat_check_store_mode(struct sec_battery_info *battery)
+ 		}
+ 	}
+ 
+-	if (!is_nocharge_type(battery->cable_type) && battery->charging_suspended && battery->charging_enabled && !battery->store_mode) {
++	if (!is_nocharge_type(battery->cable_type) && battery->charging_suspended && battery->charging_enabled && !(battery->store_mode || custom_bypass_active)) {
+ 		pr_info("%s: @battery->capacity = (%d), battery->status= (%d), battery->charging_enabled=(%d)\n",
+ 			 __func__, battery->capacity, battery->status, battery->charging_enabled);
+ 		sec_bat_set_charging_status(battery,
+@@ -9569,6 +9594,10 @@ static int sec_battery_probe(struct platform_device *pdev)
+ 		goto err_req_irq;
+ 	}
+ 
++	/* [BYPASS PATCH] Register custom fallback node */
++	if (device_create_file(&battery->psy_bat->dev, &dev_attr_custom_bypass))
++		dev_err(battery->dev, "%s: failed to create custom_bypass attr\n", __func__);
++
+ 	ret = sec_pogo_create_attrs(&battery->psy_pogo->dev);
+ 	if (ret) {
+ 		dev_err(battery->dev,
