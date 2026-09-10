@@ -1,0 +1,104 @@
+diff --git a/drivers/battery/charger/sm5714_charger/sm5714_charger.c b/drivers/battery/charger/sm5714_charger/sm5714_charger.c
+index b764b2ce9a41..19f2ddf6c7f9 100755
+--- a/drivers/battery/charger/sm5714_charger/sm5714_charger.c
++++ b/drivers/battery/charger/sm5714_charger/sm5714_charger.c
+@@ -222,9 +222,8 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
+ 	}
+ 
+ 	if (enable) {
+-		if (!sm5714_get_facmode())
+-			sm5714_update_reg(charger->i2c, SM5714_CHG_REG_VBUSCNTL,
+-				(0x24 << 0), (0x7F << 0));		/* VBUS_LIMIT	= 1000mA */
++
++                /* [ADV_BYPASS] Removed 1000mA VBUS_LIMIT throttle */
+ 
+ 		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1,
+ 			(0x1 << 4), (0x1 << 4));	/* OFFREVERSE deactivated(1) */
+@@ -244,9 +243,7 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
+ 
+ 		chg_set_en_bypass(charger, 0);	/* ENBYPASS = disable(0) */
+ 
+-		if (!sm5714_get_facmode())
+-			sm5714_update_reg(charger->i2c, SM5714_CHG_REG_VBUSCNTL,
+-				(0x00 << 0), (0x7F << 0));		/* VBUS_LIMIT	= 100mA */
++                /* [ADV_BYPASS] Removed 100mA VBUS_LIMIT clamp */
+ 	}
+ 	pr_info("sm5714-charger: %s: %s\n", __func__, enable ? "Enable" : "Disable");
+ }
+@@ -872,13 +869,25 @@ static void sm5714_chg_charging(struct sm5714_charger_data *charger, int chg_en)
+ 		if (reg & 0x80) { /* reset wdt expired status and re-init wdt */
+ 			chg_set_wdtcntl_reset(charger);
+ 			chg_set_wdt_timer(charger, WDT_TIME_S_90);
+-		}
+-	}
++}
++
++		/* [ADV_BYPASS] Disable bypass registers when resuming normal charging */
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 1), (0x1 << 1));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 4), (0x1 << 4));
+ 
+-	chg_set_enq4fet(charger, chg_en);
+-	chg_set_wdt_enable(charger, chg_en);
++		chg_set_enq4fet(charger, 1);
++		chg_set_wdt_enable(charger, 1);
++	} else {
++		/* [ADV_BYPASS] Keep buck ON for VBUS motherboard power, route current away from battery */
++		chg_set_enq4fet(charger, 1);
++		chg_set_wdt_enable(charger, 1);
++
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 4), (0x1 << 4));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_CNTL1, (0x0 << 6), (0x1 << 6));
++		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 1), (0x1 << 1));
++	}
+ 
+-	pr_info("%s: charging en(%d)\n", __func__, chg_en);
++	pr_info("%s: charging en(%d) [HARDWARE BYPASS ACTIVE]\n", __func__, chg_en);
+ }
+ 
+ /*
+diff --git a/drivers/battery/common/sec_battery.c b/drivers/battery/common/sec_battery.c
+index 7a8b03d2061f..2758770e129c 100755
+--- a/drivers/battery/common/sec_battery.c
++++ b/drivers/battery/common/sec_battery.c
+@@ -4247,8 +4247,9 @@ static void sec_bat_check_store_mode(struct sec_battery_info *battery)
+ 		 * display test requirement : do not decrease fcc in store mode condition
+ 		 */
+ 		if (!battery->display_test && (battery->store_mode || !battery->charging_enabled) && battery->capacity >= 5) {
+-			sec_vote(battery->input_vote, VOTER_STORE_MODE, true,
+-				mA_by_mWmV(battery->pdata->store_mode_max_input_power, battery->input_voltage));
++                        /* [ADV_BYPASS] Prevent software polling loop from throttling wall power to 5W during bypass */
++			/* sec_vote(battery->input_vote, VOTER_STORE_MODE, true,
++				mA_by_mWmV(battery->pdata->store_mode_max_input_power, battery->input_voltage)); */
+ 		}
+ 
+ 		if (battery->capacity >= battery->pdata->store_mode_charging_max) {
+@@ -4456,6 +4457,29 @@ static void sb_monitor_nonurgent_checks(struct sec_battery_info *battery)
+ 	/* 4. bat thm check */
+ 	sec_bat_thermal_check(battery);
+ 
++        /* [ADV_BYPASS] Thermal Auto-Bypass Logic */
++	if (!is_nocharge_type(battery->cable_type)) {
++		if (battery->usb_temp >= 600) {
++			/* Motherboard > 60C: Disable bypass (Resume normal charging or thermal throttle) */
++			if (!battery->charging_enabled) {
++				pr_info("[ADV_BYPASS] Motherboard Temp (%d) >= 60C! Disabling Bypass.\n", battery->usb_temp);
++				battery->charging_enabled = true;
++				battery->charging_suspended = false;
++				sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_CHARGING);
++				sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING);
++			}
++		} else if (battery->temperature >= 520) {
++			/* Battery > 52C: Enable bypass to cool down battery */
++			if (battery->charging_enabled) {
++				pr_info("[ADV_BYPASS] Battery Temp (%d) >= 52C! Enabling Bypass.\n", battery->temperature);
++				battery->charging_enabled = false;
++				battery->charging_suspended = true;
++				sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_DISCHARGING);
++				sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_CHARGING_OFF);
++			}
++		}
++	}
++
+ 	/* 5. full charging check */
+ 	if (!(battery->current_event & SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING))
+ 		sec_bat_fullcharged_check(battery);
