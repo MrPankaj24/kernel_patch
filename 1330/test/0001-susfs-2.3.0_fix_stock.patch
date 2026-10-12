@@ -1,0 +1,68 @@
+From 48bea54b8c762c3a6885dbebd41a7d0083d7801e Mon Sep 17 00:00:00 2001
+From: Pankaj <104743358+MrPankaj24@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 08:23:02 +0530
+Subject: [PATCH] susfs-2.3.0_fix_stock
+
+---
+ fs/exec.c      |  4 ++++
+ fs/namespace.c | 11 +++++++++++
+ fs/proc/base.c |  3 +++
+ 3 files changed, 18 insertions(+)
+
+diff --git a/fs/exec.c b/fs/exec.c
+index a227dd9e0..4ae8f2848 100644
+--- a/fs/exec.c
++++ b/fs/exec.c
+@@ -67,6 +67,10 @@
+ #include <linux/syscall_user_dispatch.h>
+ #include <linux/task_integrity.h>
+ 
++#ifdef CONFIG_KSU_SUSFS
++#include <linux/susfs_def.h>
++#endif
++
+ #include <linux/uaccess.h>
+ #include <asm/mmu_context.h>
+ #include <asm/tlb.h>
+diff --git a/fs/namespace.c b/fs/namespace.c
+index 582c0765f..0f1ef3036 100644
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -35,9 +35,20 @@
+ #include <linux/delay.h>
+ #include <linux/fslog.h>
+ 
++#ifdef CONFIG_KSU_SUSFS
++#include <linux/susfs_def.h>
++#endif // #ifdef CONFIG_KSU_SUSFS
++
+ #include "pnode.h"
+ #include "internal.h"
+ 
++#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++extern bool susfs_is_current_ksu_domain(void);
++extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
++
++#define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
++#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
++
+ /* Maximum number of mounts in a mount namespace */
+ unsigned int sysctl_mount_max __read_mostly = 100000;
+ 
+diff --git a/fs/proc/base.c b/fs/proc/base.c
+index 00232689b..66b8bb2bf 100644
+--- a/fs/proc/base.c
++++ b/fs/proc/base.c
+@@ -97,6 +97,9 @@
+ #include <linux/time_namespace.h>
+ #include <linux/resctrl.h>
+ #include <linux/cpufreq_times.h>
++#if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
++#include <linux/susfs_def.h>
++#endif // #if defined(CONFIG_KSU_SUSFS_SUS_MAP) || defined(CONFIG_KSU_SUSFS_OPEN_REDIRECT)
+ #include <linux/cn_proc.h>
+ #include <linux/task_integrity.h>
+ #include <linux/proca.h>
+-- 
+2.56.0
+
