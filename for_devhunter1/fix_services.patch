@@ -1,0 +1,29 @@
+--- services.c.orig	2026-10-13 20:01:11.785979492 +0530
++++ services.c	2026-10-13 19:57:51.850522298 +0530
+@@ -93,7 +93,7 @@
+ 				  char **scontext,
+ 				  u32 *scontext_len);
+ 
+-static void context_struct_compute_av(struct policydb *policydb,
++void context_struct_compute_av(struct policydb *policydb,
+ 				      struct context *scontext,
+ 				      struct context *tcontext,
+ 				      u16 tclass,
+@@ -460,7 +460,7 @@
+ 	return 0;
+ }
+ 
+-static void security_dump_masked_av(struct policydb *policydb,
++void security_dump_masked_av(struct policydb *policydb,
+ 				    struct context *scontext,
+ 				    struct context *tcontext,
+ 				    u16 tclass,
+@@ -618,7 +618,7 @@
+  * Compute access vectors and extended permissions based on a context
+  * structure pair for the permissions in a particular class.
+  */
+-static void context_struct_compute_av(struct policydb *policydb,
++void context_struct_compute_av(struct policydb *policydb,
+ 				      struct context *scontext,
+ 				      struct context *tcontext,
+ 				      u16 tclass,
